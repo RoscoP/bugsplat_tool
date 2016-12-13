@@ -1,0 +1,6 @@
+{
+    "databases": [
+        { "database": "Fred",                      "tags": ["flintstone", "cartoon", "default"] }
+    ],
+    "domain": ""
+}
