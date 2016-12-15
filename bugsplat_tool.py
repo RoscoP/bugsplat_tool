@@ -21,7 +21,7 @@ def login(user, passwd):
 
     return s
 
-def get_data(op, session, dbs, count, id, baseurl=None):
+def get_data(op, session, dbs, count, ids, baseurl=None):
     log = logging.getLogger('bugsplat')
     maxpagesize = 1000
     data = []
@@ -33,23 +33,29 @@ def get_data(op, session, dbs, count, id, baseurl=None):
 
     baseurl = baseurl if baseurl else 'https://www.bugsplat.com/{}/?data&database={{}}&pagesize={{}}&pagenum={{}}'.format(op)
 
-    for db in dbs:
+    for i, db in enumerate(dbs):
         t1 = time.time()
         dbdata = None
         log.debug("Gathering {} data for database {}     : {:>6} entries max".format(op, db['database'], count*pagecount))
         for p in range(pagecount):
             log.debug("Gathering {} data for database {} page: {:>6} / {:>6}".format(op, db['database'], p+1, pagecount))
             url = baseurl.format(db['database'], count, p)
-            r = session.get(url)
-            r.raise_for_status()
-            calldata = r.json()
-            breakout = False
+
+            try:
+                r = session.get(url)
+                r.raise_for_status()
+                calldata = r.json()
+            except Exception as e:
+                log.error("Error getting data at url: {} - assuming no more data: {}".format(url, e))
+                break
+
+            breakout = 0
             # retreive up to this id
-            if id:
-                for i,d in enumerate(calldata[0]['Rows']):
-                    if d['id'] == id:
-                        calldata[0]['Rows'] = calldata[0]['Rows'][0:i]
-                        breakout = True
+            if ids and i < len(ids):
+                for j, d in enumerate(calldata[0]['Rows']):
+                    if d['id'] == ids[i]:
+                        calldata[0]['Rows'] = calldata[0]['Rows'][0:j]
+                        breakout = ids[i]
                         break
 
             # Collect all the multiple pages for the same database together
@@ -59,13 +65,13 @@ def get_data(op, session, dbs, count, id, baseurl=None):
                 dbdatalen = len(dbdata[0]['Rows'])
                 # Look through the end of the list for duplicates, since the bugsplat database is updating in real time, our pages
                 # will not have the correct boarders, and contain duplicates.
-                for i in range(min(dbdatalen,100)):
-                    if dbdata[0]['Rows'][dbdatalen-1 - i] == calldata[0]['Rows'][0]:
-                        dbdata[0]['Rows'] = dbdata[0]['Rows'][:(dbdatalen-1 - i)]
+                for k in range(min(dbdatalen,100)):
+                    if dbdata[0]['Rows'][dbdatalen-1 - k] == calldata[0]['Rows'][0]:
+                        dbdata[0]['Rows'] = dbdata[0]['Rows'][:(dbdatalen-1 - k)]
                         break
                 dbdata[0]['Rows'] += calldata[0]['Rows']
             if breakout:
-                log.debug("Found id {}, stopping after {} records".format(id, len(dbdata[0]['Rows'])))
+                log.debug("Found id {}, stopping after {} records".format(breakout, len(dbdata[0]['Rows'])))
                 break
 
         data += dbdata
@@ -78,8 +84,7 @@ def get_email(user, domain):
     return "{}@{}".format(user, domain) if domain else user
 
 def main():
-    version = "1.0.0"
-    parser = argparse.ArgumentParser(description="Get and set various bugsplat data.  Uses json file for database listing and properties.  You can match database by name or tag through this file.  Uses 'default' tag if no database or tag supplied with the command.  Try 'bugsplat_tool.py -call -u Fred -p Flintstone' to see a demo.  Hosted: https://github.com/RoscoP/bugsplat_tool version: {}".format(version))
+    parser = argparse.ArgumentParser(description="Get and set various bugsplat data.  Uses json file for database listing and properties.  You can match database by name or tag through this file.  Uses 'default' tag if no database or tag supplied with the command.  Try 'bugsplat_tool.py -call -u Fred -p Flintstone' to see a demo.  Hosted: https://gh.riotgames.com/rlewis/bugsplat_tool")
     parser.add_argument("-u", "--user",         default='',                         help='User name (full e-mail) for bugsplat authentication')
     parser.add_argument("-p", "--password",     default='',                         help='Password for bugsplat authentication')
     parser.add_argument("-a", "--adduser",      default=[], nargs = '+', type=str,  help='Add user to selected databases')
@@ -95,7 +100,7 @@ def main():
     parser.add_argument("-c", "--count",        default=10,                         help='Max count of crash/summary info to get')
     parser.add_argument("-v", "--verbose",      action='store_true',                help='Show detailed logging')
     parser.add_argument("-o", "--out",          default='',                         help='File to output results to, otherwise it goes to stdout')
-    parser.add_argument("-i", "--id",           default=None,                       help='Retreive records up to this id')
+    parser.add_argument("-i", "--ids",          default=[], nargs = '+', type=str,  help='Retreive records up to this id, id for each db passed in')
     args = parser.parse_args()
 
     data = bugsplat_tool(**vars(args))
@@ -116,7 +121,7 @@ def bugsplat_tool(  user        = '',
                     verbose     = False,
                     out         = '',
                     return_data = False,
-                    id          = None):
+                    ids         = []):
 
     logging.basicConfig(level=logging.ERROR, datefmt='%Y-%m-%d %H:%M:%S', format='%(message)s')
     log = logging.getLogger('bugsplat')
@@ -185,13 +190,13 @@ def bugsplat_tool(  user        = '',
     elif is_command:
         data = []
         if userlist:
-            data = get_data('users', s, dbs, count, id)
+            data = get_data('users', s, dbs, count, ids)
         elif allcrash:
-            data = get_data('allCrash', s, dbs, count, id)
+            data = get_data('allCrash', s, dbs, count, ids)
         elif summary:
-            data = get_data('summary', s, dbs, count, id)
+            data = get_data('summary', s, dbs, count, ids)
         elif version:
-            data = get_data('versions', s, dbs, count, id)
+            data = get_data('versions', s, dbs, count, ids)
         if data:
             if return_data:
                 return data
