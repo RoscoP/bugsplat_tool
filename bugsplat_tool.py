@@ -36,9 +36,9 @@ def get_data(op, session, dbs, count, ids, baseurl=None):
     for i, db in enumerate(dbs):
         t1 = time.time()
         dbdata = None
-        log.debug("Gathering {} data for database {}     : {:>6} entries max".format(op, db['database'], count*pagecount))
+        log.debug("Gathering {} data for database {:30}     : {:>6} entries max".format(op, db['database'], count*pagecount))
         for p in range(pagecount):
-            log.debug("Gathering {} data for database {} page: {:>6} / {:>6}".format(op, db['database'], p+1, pagecount))
+            log.debug("Gathering {} data for database {:30} page: {:>6} / {:>6}".format(op, db['database'], p+1, pagecount))
             url = baseurl.format(db['database'], count, p)
 
             try:
@@ -76,7 +76,7 @@ def get_data(op, session, dbs, count, ids, baseurl=None):
 
         data += dbdata
         t2 = time.time()
-        log.debug("Gathering {} data for database {} done: {:>6.3f}".format(op, db['database'], t2-t1))
+        log.debug("Gathering {} data for database {:30} done: {:>6.3f}".format(op, db['database'], t2-t1))
 
     return data
 
@@ -91,6 +91,7 @@ def main():
     parser.add_argument("-r", "--remuser",      default=[], nargs = '+', type=str,  help='Del user to selected databases')
     parser.add_argument("-d", "--dbs",          default=[], nargs = '+', type=str,  help='List of databases to use')
     parser.add_argument("-t", "--tags",         default=[], nargs = '+', type=str,  help='Tags to match for database selection')
+    parser.add_argument("-O", "--ortag",        action='store_true',                help="Tags are or'd for matching")
     parser.add_argument("-s", "--show",         action='store_true',                help='Show database and tags matched')
     parser.add_argument("-call", "--allcrash",  action='store_true',                help='Show allcrash information for database selection')
     parser.add_argument("-csum", "--summary",   action='store_true',                help='Show summary information for database selection')
@@ -111,6 +112,7 @@ def bugsplat_tool(  user        = '',
                     remuser     = [],
                     dbs         = [],
                     tags        = [],
+                    ortag       = False,
                     show        = False,
                     allcrash    = False,
                     summary     = False,
@@ -143,7 +145,10 @@ def bugsplat_tool(  user        = '',
     dbs  = [db for db in ALL_DBS if db['database'] in dbs]
     # Pick the tagged databases
     if tags:
-       dbs += [db for db in ALL_DBS if set(tags).issubset(set(db['tags']))]
+        if ortag:
+            dbs += [db for db in ALL_DBS if set(tags).intersection(set(db['tags']))]
+        else:
+            dbs += [db for db in ALL_DBS if set(tags).issubset(set(db['tags']))]
 
     if show:
         log.info("{:40} : {}".format('Database', 'Tags'))
