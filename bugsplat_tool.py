@@ -36,10 +36,10 @@ def get_data(op, session, dbs, count, ids, baseurl=None):
     for i, db in enumerate(dbs):
         t1 = time.time()
         dbdata = None
-        log.debug("Gathering {} data for database {:30}     : {:>6} entries max".format(op, db['database'], count*pagecount))
+        log.debug("Gathering {} data for database {:30}     : {:>6} entries max".format(op, db, count*pagecount))
         for p in range(pagecount):
-            log.debug("Gathering {} data for database {:30} page: {:>6} / {:>6}".format(op, db['database'], p+1, pagecount))
-            url = baseurl.format(db['database'], count, p)
+            log.debug("Gathering {} data for database {:30} page: {:>6} / {:>6}".format(op, db, p+1, pagecount))
+            url = baseurl.format(db, count, p)
 
             try:
                 r = session.get(url)
@@ -76,7 +76,7 @@ def get_data(op, session, dbs, count, ids, baseurl=None):
 
         data += dbdata
         t2 = time.time()
-        log.debug("Gathering {} data for database {:30} done: {:>6.3f}".format(op, db['database'], t2-t1))
+        log.debug("Gathering {} data for database {:30} done: {:>6.3f}".format(op, db, t2-t1))
 
     return data
 
@@ -135,26 +135,24 @@ def bugsplat_tool(  user        = '',
 
     with open(os.path.splitext(__file__)[0] + '.json', 'r') as f:
         settings = json.load(f)
-        ALL_DBS = settings['databases']
+        settings_dbs = settings['databases']
         domain = settings.get('domain', domain)
 
     # if no databases picked, then choose the default set
     if not dbs and not tags:
         tags = ['default']
-    # pick out the explicit databases from the data file
-    dbs  = [db for db in ALL_DBS if db['database'] in dbs]
     # Pick the tagged databases
     if tags:
         if ortag:
-            dbs += [db for db in ALL_DBS if set(tags).intersection(set(db['tags']))]
+            dbs += [db for db in settings_dbs.keys() if set(tags).intersection(set(settings_dbs[db]))]
         else:
-            dbs += [db for db in ALL_DBS if set(tags).issubset(set(db['tags']))]
+            dbs += [db for db in settings_dbs.keys() if set(tags).issubset(set(settings_dbs[db]))]
 
     if show:
         log.info("{:40} : {}".format('Database', 'Tags'))
         log.info("{:40}---{}".format('-'*40, '-'*30))
-        for entry in dbs:
-            log.info("{:40} : {}".format(entry['database'], ", ".join(entry['tags'])))
+        for db in dbs:
+            log.info("{:40} : {}".format(db, ", ".join(settings_dbs[db])))
         return
 
     if not dbs:
@@ -172,8 +170,8 @@ def bugsplat_tool(  user        = '',
     if adduser:
         for db in dbs:
             for user in adduser:
-                log.debug("Adding user {} to {}".format(user, db['database']))
-                r = s.get('https://www.bugsplat.com/users/?insert=true&username={}&database={}'.format(get_email(user, domain).replace('@','%40'), db['database']))
+                log.debug("Adding user {} to {}".format(user, db))
+                r = s.get('https://www.bugsplat.com/users/?insert=true&username={}&database={}'.format(get_email(user, domain).replace('@','%40'), db))
                 r.raise_for_status()
                 # Bugsplat just says '1' when it successful
                 if r.text != '1':
@@ -181,13 +179,13 @@ def bugsplat_tool(  user        = '',
     elif remuser:
         full_usernames = [get_email(user, domain) for user in remuser]
         for db in dbs:
-            r = s.get('https://www.bugsplat.com/users/?data&database={}&pagesize=1000'.format(db['database']))
+            r = s.get('https://www.bugsplat.com/users/?data&database={}&pagesize=1000'.format(db))
             r.raise_for_status()
             uid_table = r.json()
             uids = [{'uid':uid['uId'], 'user':uid['username'].split('@')[0]} for uid in uid_table[0]['Rows'] if uid['username'] in full_usernames]
             for uid in uids:
-                log.debug("Deleting user {} uid:{} from {}".format(uid['user'], uid['uid'], db['database']))
-                r = s.get('https://www.bugsplat.com/users/?delete&uId={}&database={}'.format(uid['uid'], db['database']))
+                log.debug("Deleting user {} uid:{} from {}".format(uid['user'], uid['uid'], db))
+                r = s.get('https://www.bugsplat.com/users/?delete&uId={}&database={}'.format(uid['uid'], db))
                 r.raise_for_status()
                 # Bugsplat just says '1' when it is successful
                 if r.text != '1':
