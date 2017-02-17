@@ -21,7 +21,7 @@ def login(user, passwd):
 
     return s
 
-def get_data(op, session, dbs, count, ids, baseurl=None):
+def get_data(op, session, dbs, count, ids, baseurl=None, urlargs=None):
     log = logging.getLogger('bugsplat')
     maxpagesize = 1000
     data = []
@@ -31,7 +31,7 @@ def get_data(op, session, dbs, count, ids, baseurl=None):
         pagecount = (int(count)+999) / maxpagesize
         count = maxpagesize
 
-    baseurl = baseurl if baseurl else 'https://www.bugsplat.com/{}/?data&database={{}}&pagesize={{}}&pagenum={{}}'.format(op)
+    baseurl = baseurl if baseurl else 'https://www.bugsplat.com/{}/?data&database={{}}&pagesize={{}}&pagenum={{}}{}'.format(op, ('&' + urlargs) if urlargs else '')
 
     for i, db in enumerate(dbs):
         t1 = time.time()
@@ -40,8 +40,11 @@ def get_data(op, session, dbs, count, ids, baseurl=None):
         for p in range(pagecount):
             log.debug("Gathering {} data for database {:30} page: {:>6} / {:>6}".format(op, db, p+1, pagecount))
             url = baseurl.format(db, count, p)
+            calldata = None
 
             try:
+                r = None
+                log.debug("URL: {}".format(url))
                 r = session.get(url)
                 r.raise_for_status()
                 calldata = r.json()
@@ -52,6 +55,8 @@ def get_data(op, session, dbs, count, ids, baseurl=None):
             breakout = 0
             # retreive up to this id
             if ids and i < len(ids):
+                if len(calldata[0]['Rows']):
+                    log.debug("ID: {} -> {}".format(calldata[0]['Rows'][-1]['id'], calldata[0]['Rows'][0]['id']))
                 for j, d in enumerate(calldata[0]['Rows']):
                     if d['id'] == ids[i]:
                         calldata[0]['Rows'] = calldata[0]['Rows'][0:j]
@@ -84,7 +89,7 @@ def get_email(user, domain):
     return "{}@{}".format(user, domain) if domain else user
 
 def main():
-    parser = argparse.ArgumentParser(description="Get and set various bugsplat data.  Uses json file for database listing and properties.  You can match database by name or tag through this file.  Uses 'default' tag if no database or tag supplied with the command.  Try 'bugsplat_tool.py -call -u Fred -p Flintstone' to see a demo.  Hosted: https://gh.riotgames.com/rlewis/bugsplat_tool")
+    parser = argparse.ArgumentParser(description="Get and set various bugsplat data.  Uses json file for database listing and properties.  You can match database by name or tag through this file.  Uses 'default' tag if no database or tag supplied with the command.  Try 'bugsplat_tool.py -call -u Fred -p Flintstone' to see a demo.  Hosted: https://github.com/RoscoP/bugsplat_tool")
     parser.add_argument("-u", "--user",         default='',                         help='User name (full e-mail) for bugsplat authentication')
     parser.add_argument("-p", "--password",     default='',                         help='Password for bugsplat authentication')
     parser.add_argument("-a", "--adduser",      default=[], nargs = '+', type=str,  help='Add user to selected databases')
@@ -97,6 +102,8 @@ def main():
     parser.add_argument("-csum", "--summary",   action='store_true',                help='Show summary information for database selection')
     parser.add_argument("-cver", "--version",   action='store_true',                help='Show version information for database selection')
     parser.add_argument("-cusr", "--userlist",  action='store_true',                help='Show user information for database selection')
+    parser.add_argument("-czip", "--zips",      action='store_true',                help='Download zips for crashes')
+    parser.add_argument("-ckey", "--keycrash",  default=None,                       help='Get json for a specific crash ID')
     parser.add_argument("-dom", "--domain",     default='',                         help='Domain to use for users when adding.')
     parser.add_argument("-c", "--count",        default=10,                         help='Max count of crash/summary info to get')
     parser.add_argument("-v", "--verbose",      action='store_true',                help='Show detailed logging')
@@ -118,6 +125,8 @@ def bugsplat_tool(  user        = '',
                     summary     = False,
                     version     = False,
                     userlist    = False,
+                    zips        = False,
+                    keycrash    = False,
                     domain      = '',
                     count       = 10,
                     verbose     = False,
@@ -129,8 +138,8 @@ def bugsplat_tool(  user        = '',
     log = logging.getLogger('bugsplat')
     log.setLevel(logging.DEBUG)
 
-    is_command = allcrash or summary or version or userlist
-    if not verbose and is_command and not out and not return_data:
+    is_command = allcrash or summary or version or userlist or zips or keycrash
+    if not verbose:
         log.setLevel(logging.INFO)
 
     with open(os.path.splitext(__file__)[0] + '.json', 'r') as f:
@@ -194,12 +203,30 @@ def bugsplat_tool(  user        = '',
         data = []
         if userlist:
             data = get_data('users', s, dbs, count, ids)
-        elif allcrash:
+        elif allcrash or zips:
             data = get_data('allCrash', s, dbs, count, ids)
+            if zips:
+                for d in data[0]['Rows']:
+                    try:
+                        crash_url = "https://www.bugsplat.com/individualCrash/?data&id={}&database={}".format(d['id'], data[0]['Database'])
+                        crash_resp = s.get(crash_url)
+                        crash_resp.raise_for_status()
+                        zip_url = crash_resp.json()['s3URL']
+                        zip_resp = s.get(zip_url, stream=True)
+                        zip_resp.raise_for_status()
+                        zipname = '{}_{}.zip'.format(data[0]['Database'], d['id'])
+                        log.info("Saving file: {}".format(zipname))
+                        with open(zipname, 'wb') as f:
+                            for blk in zip_resp.iter_content(10*1024):
+                                f.write(blk)
+                    except Exception as e:
+                        log.error("Failed while trying to save zip for ID: {} - {}".format(d['id'], str(e)))
         elif summary:
             data = get_data('summary', s, dbs, count, ids)
         elif version:
             data = get_data('versions', s, dbs, count, ids)
+        elif keycrash:
+            data = get_data('keycrash', s, dbs, count, ids, urlargs='stackKeyId={}'.format(keycrash))
         if data:
             if return_data:
                 return data
@@ -210,7 +237,7 @@ def bugsplat_tool(  user        = '',
                 log.debug("Writing data to file: {}".format(out))
                 with open(out, "w") as f:
                     f.write(data_str)
-            else:
+            elif not zips:
                 log.info(data_str)
     else:
         log.error("Unknown command")
