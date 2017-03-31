@@ -102,7 +102,7 @@ def main():
     parser.add_argument("-csum", "--summary",   action='store_true',                help='Show summary information for database selection')
     parser.add_argument("-cver", "--version",   action='store_true',                help='Show version information for database selection')
     parser.add_argument("-cusr", "--userlist",  action='store_true',                help='Show user information for database selection')
-    parser.add_argument("-czip", "--zips",      action='store_true',                help='Download zips for crashes')
+    parser.add_argument("-czip", "--zips",      action='store_true',                help='Download zips for crashes - works with --allcrash and --keycrash')
     parser.add_argument("-ckey", "--keycrash",  default=None,                       help='Get json for a specific crash ID')
     parser.add_argument("-dom", "--domain",     default='',                         help='Domain to use for users when adding.')
     parser.add_argument("-c", "--count",        default=10,                         help='Max count of crash/summary info to get')
@@ -203,30 +203,32 @@ def bugsplat_tool(  user        = '',
         data = []
         if userlist:
             data = get_data('users', s, dbs, count, ids)
-        elif allcrash or zips:
+        elif allcrash:
             data = get_data('allCrash', s, dbs, count, ids)
-            if zips:
-                for d in data[0]['Rows']:
-                    try:
-                        crash_url = "https://www.bugsplat.com/individualCrash/?data&id={}&database={}".format(d['id'], data[0]['Database'])
-                        crash_resp = s.get(crash_url)
-                        crash_resp.raise_for_status()
-                        zip_url = crash_resp.json()['s3URL']
-                        zip_resp = s.get(zip_url, stream=True)
-                        zip_resp.raise_for_status()
-                        zipname = '{}_{}.zip'.format(data[0]['Database'], d['id'])
-                        log.info("Saving file: {}".format(zipname))
-                        with open(zipname, 'wb') as f:
-                            for blk in zip_resp.iter_content(10*1024):
-                                f.write(blk)
-                    except Exception as e:
-                        log.error("Failed while trying to save zip for ID: {} - {}".format(d['id'], str(e)))
         elif summary:
             data = get_data('summary', s, dbs, count, ids)
         elif version:
             data = get_data('versions', s, dbs, count, ids)
         elif keycrash:
             data = get_data('keycrash', s, dbs, count, ids, urlargs='stackKeyId={}'.format(keycrash))
+
+        if zips and (keycrash or allcrash):
+            for d in data[0]['Rows']:
+                try:
+                    crash_url = "https://www.bugsplat.com/individualCrash/?data&id={}&database={}".format(d['id'], data[0]['Database'])
+                    crash_resp = s.get(crash_url)
+                    crash_resp.raise_for_status()
+                    zip_url = crash_resp.json()['s3URL']
+                    zip_resp = s.get(zip_url, stream=True)
+                    zip_resp.raise_for_status()
+                    zipname = '{}_{}.zip'.format(data[0]['Database'], d['id'])
+                    log.info("Saving file: {}".format(zipname))
+                    with open(zipname, 'wb') as f:
+                        for blk in zip_resp.iter_content(10*1024):
+                            f.write(blk)
+                except Exception as e:
+                    log.error("Failed while trying to save zip for ID: {} - {}".format(d['id'], str(e)))
+
         if data:
             if return_data:
                 return data
